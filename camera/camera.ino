@@ -1,24 +1,24 @@
 /*
 
-Copyright (c) 2019 Google Inc.
+  Copyright (c) 2019 Google Inc.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
 
 */
 
@@ -27,6 +27,15 @@ SOFTWARE.
 #include "MLX90640_API.h"
 #include "MLX90640_I2C_Driver.h"
 
+// Wifi stuff.
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <DNSServer.h>
+#include <WiFiManager.h>
+
+std::unique_ptr<ESP8266WebServer> web;
+
+const char *apName = "IRCameraAP";
 const byte MLX90640_address = 0x33; // Default 7-bit unshifted address of the MLX90640
 
 #define TA_SHIFT 8 // Default shift for MLX90640 in open air
@@ -103,9 +112,20 @@ void loop()
   MLX90640_BadPixelsCorrection(mlx90640.brokenPixels, mlx90640To, mode, &mlx90640);
 
   if (button == 0 && lastButton == 1) {
-    printTemps(mlx90640To);
+    configWifi();
   }
+
   displayTemps(mlx90640To, readMillis);
+
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiMessage("IP: " +  WiFi.localIP().toString());
+
+    if (web == NULL) {
+      setupWebserver();
+    }
+
+    web->handleClient();
+  }
 }
 
 // Returns true if the MLX90640 is detected on the I2C bus
@@ -211,7 +231,7 @@ void drawPixels(float *temps, float tmin, float tmax) {
 
 void drawTemps(float tmin, float tmax, float realMin, float realMax) {
   int ymax = 24 * 4;
-  int ytext = 24 * 5;
+  int ytext = 108;
   int steps = 3;
 
   tft.setCursor(0, 6 * 24);
@@ -227,7 +247,6 @@ void drawTemps(float tmin, float tmax, float realMin, float realMax) {
     tft.setCursor(x, ytext);
     tft.print(String(t, 0) + "  ");
   }
-
 }
 
 void drawStats(const String &msg) {
@@ -247,4 +266,67 @@ void displayTemps(float *temps, int readMillis) {
   drawTemps(tmin, tmax, realMin, realMax);
   String msg = "R" + String(readMillis, 10) + "ms D" + String(millis() - start, 10) + "ms  ";
   drawStats(msg);
+}
+
+
+/***** web serving ******/
+
+void configWifi() {
+  tft.fillScreen(ST7735_BLACK);
+  wifiMessage("ESSID: " + String(apName));
+
+  WiFiManager wifiManager;
+  wifiManager.setTimeout(120);
+  wifiManager.setDebugOutput(true);
+  if (!wifiManager.autoConnect(apName)) {
+    wifiMessage("failed to connect");
+    delay(3000);
+  }
+}
+
+void wifiMessage(String const &msg) {
+  tft.setFont();
+  tft.setCursor(0, 132);
+  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+  tft.setTextSize(0);
+  tft.println(msg);
+}
+
+void handleTemp() {
+  // - xx . x ,
+  // xxx  . x ,
+  String out;
+  out.reserve(768 * 6 + 10);
+  out += "[";
+  for (int y = 0; y < 24; y++) {
+    out += "[";
+    for (int x = 0; x < 32; x++ ) {
+      float t = mlx90640To[(31 - x) + y * 32];
+
+      out += String(t, 1);
+      if (x < 31) {
+        out += ",";
+      }
+    }
+    out += "]";
+    if (y < 24) {
+      out += ",\n";
+    }
+  }
+  out += "]\n";
+
+  web->send(200, "application/json", out.c_str());
+}
+
+void setupWebserver() {
+  web.reset(new ESP8266WebServer(80));
+  // TODO - allow to set emissivity
+  // TODO - allow to skip processing and dump raw sensor data?
+  // TODO - dump MLX parameters?
+  web->on("/temp", handleTemp);
+  web->on("/", []() {
+    web->send(200, "text/plain",
+              "<html><body><p>endpoint: <tt>GET /temp</tt> dump latest reading</body></html>");
+  });
+  web->begin();
 }
