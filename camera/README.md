@@ -24,6 +24,25 @@ Instructions
 4. Drill holes in perspex
 5. Mount components (all components on the same side; TFT display facing the glass)
 
+
+
+Wifi
+====
+
+
+Press the FLASH button to enter Wifi configuration. Connect to the
+"IRCameraAP" access point. A captive portal should redirect to a
+configuration page. Configure network and password. 
+
+Once Wifi is enabled, the display shows the IP address
+
+The IP address supports the following endpoints:
+
+   * /temp - dump temperatures as a 32x24 JSON nested array
+   * /parameter - get and set parameter values.
+   * / 
+
+
 LICENSE
 =======
 
@@ -33,8 +52,3 @@ This is based on code from
 
 which is MIT licensed; the MLX90640 driver is licensed under the
 Apache license
-
-TODO
-====
-
-Serve temperature data over wifi
