@@ -9,8 +9,8 @@ Hardware
 
 * Sparkfun IR Array Breakout 55 degree FoV, MLX90640 
 * ESP8266 based NodeMCU board (I used LoLin v3)
-* 12x patch cable 2.54mm pitch, female-female
-* 1x Perspex sheet, ca. 300 x 150mmm
+* 12x patch cable 10cm female-female (2.54mm pitch)
+* 1x Perspex sheet, ca. 200 x 100mmm
 * 12x M2.5 screws (10mm),
 * 24x M2.5 nuts
 * 1x ST7735 based TFT display 128x160,
@@ -18,17 +18,33 @@ Hardware
 Instructions
 ============
 
-1. Wire up IR (TODO: pinout)
-2. Wire up TFT (TODO: pinout)
+1. Wire up IR
+
+   D1 (nodemcu) - SDA (sensor) 
+   D2 (nodemcu) - SDK (sensor) 
+   3v (nodemcu) - 3.3V (sensor)
+   G  (nodemcu) - GND (sensor)
+
+2. Wire up TFT
+
+    nodemcu  - TFT
+    3v - LED
+    D5 - SCK
+    D7 - SDA
+    D4 - A0/DC
+    D0 - RST
+    D8 - CS
+    G  - GND
+    VCC - 3V
+
 3. Flash firmware & test.
-4. Drill holes in perspex
-5. Mount components (all components on the same side; TFT display facing the glass)
+4. Drill holes in perspex. Don't forget hole for the FLASH button.
+5. Mount components. All components on the same side; TFT display facing the glass.
 
 
 
 Wifi
 ====
-
 
 Press the FLASH button to enter Wifi configuration. Connect to the
 "IRCameraAP" access point. A captive portal should redirect to a
