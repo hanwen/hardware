@@ -45,7 +45,15 @@ const char *apName = "IRCameraAP";
 const byte MLX90640_address = 0x33; // Default 7-bit unshifted address of the MLX90640
 
 struct Params {
-  float TA_SHIFT;
+
+  // In order to compensate correctly for the emissivity and achieve
+  // best accuracy we need to know the surrounding temperature which
+  // is responsible for the second component of the IR signal namely
+  // the reflected part.  In case this temperature is not available
+  // and cannot be provided it might be replaced by T_{a} - 8. 
+  float ambientTempShift;
+
+  // Emissivity of the object. 
   float emissivity;
 
   // Refresh rate. This seems to be the rate for reading a
@@ -53,13 +61,13 @@ struct Params {
   float frequency;
 
   Params() {
-    TA_SHIFT = 8.0; // Default shift for MLX90640 in open air
+    ambientTempShift = 8.0;
     emissivity = 0.95;
     frequency = 4.0;
   }
   
   boolean valid() {
-    return (TA_SHIFT > -100 && TA_SHIFT < 100 &&
+    return (ambientTempShift > -100 && ambientTempShift < 100 &&
             emissivity > 0.0 && emissivity < 1.0 &&
             frequency >= 0.5 && frequency <= 64
             );
@@ -82,7 +90,8 @@ struct Params {
 
 Params params;
 
-static float mlx90640To[768];
+// temperatures. Indexed right to left, so use [(31-x) + y * 32]
+float tempPixels[768];
 paramsMLX90640 mlx90640;
 
 void setup()
@@ -104,12 +113,12 @@ void setup()
 
   // Get device parameters - We only have to do this once
   int status;
-  uint16_t eeMLX90640[832];
-  status = MLX90640_DumpEE(MLX90640_address, eeMLX90640);
+  uint16_t eepromData[832];
+  status = MLX90640_DumpEE(MLX90640_address, eepromData);
   if (status != 0)
     Serial.println("Failed to load system parameters");
 
-  status = MLX90640_ExtractParameters(eeMLX90640, &mlx90640);
+  status = MLX90640_ExtractParameters(eepromData, &mlx90640);
   if (status != 0)
     Serial.println("Parameter extraction failed");
 
@@ -118,7 +127,7 @@ void setup()
   // Once EEPROM has been read at 400kHz we can increase to 1MHz
   Wire.setClock(1000000);
 
-  // Once params are extracted, we can release eeMLX90640 array
+  // Once params are extracted, we can release eepromData array
 }
 
 int lastButton;
@@ -145,22 +154,22 @@ void loop()
     
     float vdd = MLX90640_GetVdd(mlx90640Frame, &mlx90640);
     float Ta = MLX90640_GetTa(mlx90640Frame, &mlx90640);
-    float tr = Ta - params.TA_SHIFT; // Reflected temperature based on the sensor ambient temperature
+    float tr = Ta - params.ambientTempShift; // Reflected temperature based on the sensor ambient temperature
 
     yield();
-    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, params.emissivity, tr, mlx90640To);
+    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, params.emissivity, tr, tempPixels);
     yield();
   }
   int readMillis = millis() - start;
-  MLX90640_BadPixelsCorrection(mlx90640.outlierPixels, mlx90640To, mode, &mlx90640);
-  MLX90640_BadPixelsCorrection(mlx90640.brokenPixels, mlx90640To, mode, &mlx90640);
+  MLX90640_BadPixelsCorrection(mlx90640.outlierPixels, tempPixels, mode, &mlx90640);
+  MLX90640_BadPixelsCorrection(mlx90640.brokenPixels, tempPixels, mode, &mlx90640);
   yield();
 
   if (button == 0 && lastButton == 1) {
     configWifi();
   }
 
-  displayTemps(mlx90640To, readMillis);
+  displayTemps(tempPixels, readMillis);
 
   if (WiFi.status() == WL_CONNECTED) {
     wifiMessage("IP: " +  WiFi.localIP().toString());
@@ -175,7 +184,7 @@ void loop()
 
 // Returns true if the MLX90640 is detected on the I2C bus
 boolean isConnected() { 
- Wire.beginTransmission((uint8_t)MLX90640_address);
+  Wire.beginTransmission((uint8_t)MLX90640_address);
   if (Wire.endTransmission() != 0)
     return (false); // Sensor did not ACK
   return (true);
@@ -343,7 +352,7 @@ void handleTemp() {
   for (int y = 0; y < 24; y++) {
     out += "[";
     for (int x = 0; x < 32; x++ ) {
-      float t = mlx90640To[(31 - x) + y * 32];
+      float t = tempPixels[(31 - x) + y * 32];
 
       out += String(t, 1);
       if (x < 31) {
@@ -377,7 +386,7 @@ void handleParam() {
   if (name == "emissivity") {
     p = &newParams.emissivity;
   } else if (name == "tashift") {
-    p = &newParams.TA_SHIFT;
+    p = &newParams.ambientTempShift;
   } else if (name == "frequency") {
     p = &newParams.frequency;
   }
