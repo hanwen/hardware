@@ -22,25 +22,39 @@
 
 */
 
+#include <ctype.h>
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266WiFi.h>
+#include <WiFiManager.h>
 #include <Wire.h>
 
 #include "MLX90640_API.h"
 #include "MLX90640_I2C_Driver.h"
 
-// Wifi stuff.
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include <DNSServer.h>
-#include <WiFiManager.h>
-
+void setupTFT();
+boolean isConnected();
+void configWifi();
+void displayTemps(float *temps, int readMillis);
+void wifiMessage(String const &msg);
+void setupWebserver();
+  
 std::unique_ptr<ESP8266WebServer> web;
 
 const char *apName = "IRCameraAP";
 const byte MLX90640_address = 0x33; // Default 7-bit unshifted address of the MLX90640
-struct {
+
+struct Params {
   float TA_SHIFT;
   float emissivity;
-} params = {
+
+  boolean valid() {
+    return (TA_SHIFT > -100 && TA_SHIFT < 100 &&
+            emissivity > 0.0 && emissivity < 1.0);
+  }
+};
+
+Params params = {
   8.0, // Default shift for MLX90640 in open air
   0.95,
 };
@@ -138,9 +152,8 @@ void loop()
 }
 
 // Returns true if the MLX90640 is detected on the I2C bus
-boolean isConnected()
-{
-  Wire.beginTransmission((uint8_t)MLX90640_address);
+boolean isConnected() { 
+ Wire.beginTransmission((uint8_t)MLX90640_address);
   if (Wire.endTransmission() != 0)
     return (false); // Sensor did not ACK
   return (true);
@@ -174,8 +187,6 @@ void heatmapColor(byte *rgb, float t, float tmin, float tmax) {
     rgb[i] = 255.0 * map[r + 1][i] * dr + 255.0 * map[r][i] * (1 - dr);
   }
 }
-
-
 
 void minmax(float *temps,
             float *tmin,
@@ -327,19 +338,50 @@ void handleTemp() {
   web->send(200, "application/json", out.c_str());
 }
 
-void handleEmissivity() {
-  if (web->method() == HTTP_GET) {
-    web->send(200, "text/plain",
-              String(params.emissivity, 4));
-  } else {
-    web->send(404, "text/plain", "not found");
+void handleParam() {
+  String name;
+  String val;
+  for (int i = 0; i < web->args(); i++) {
+    if (web->argName(i) == "n") {
+      name = web->arg(i);
+    }
+    if (web->argName(i) == "v") {
+      val = web->arg(i);
+    }
   }
-}
 
-void handleTaShift() {
+  Params newParams = params;
+  float *p = NULL;
+  if (name == "emissivity") {
+    p = &newParams.emissivity;
+  } else if (name == "tashift") {
+    p = &newParams.TA_SHIFT;
+  }
+
+  if (NULL == p) {
+    web->send(400, "text/plain", "unknown 'n' parameter  '" + name + "'.\n"
+              + "Supported: emissivity, tashift");
+    return;
+  }
+    
   if (web->method() == HTTP_GET) {
     web->send(200, "text/plain",
-              String(params.TA_SHIFT, 2));
+              String(*p, 4));
+  } else if (web->method() == HTTP_POST) {
+    if (val.length() == 0 || !isdigit(val[0])) {
+      web->send(400, "text/plain", "value must start with digit: '" + val + "'");
+      return;
+    }
+    
+    *p = val.toFloat();
+    if (!newParams.valid()) {
+      web->send(400, "text/plain", "invalid parameter value");
+      return;
+    }
+
+    params = newParams;
+    web->send(200, "text/plain",
+              String(*p, 4));
   } else {
     web->send(404, "text/plain", "not found");
   }
@@ -347,18 +389,15 @@ void handleTaShift() {
 
 void setupWebserver() {
   web.reset(new ESP8266WebServer(80));
-  // TODO - allow to set emissivity
   // TODO - allow to skip processing and dump raw sensor data?
   // TODO - dump MLX parameters?
   web->on("/temp", handleTemp);
-  web->on("/emissivity", handleEmissivity);
-  web->on("/tashift", handleTaShift);
+  web->on("/param", handleParam);
   web->on("/", []() {
     web->send(200, "text/html",
               String("<html><body><p>endpoint:<ul>") +  
               "<li> <tt>GET /temp</tt> dump latest reading" +
-              "<li> <tt>GET /emisssivity</tt> dump emissivity" +
-              "<li> <tt>GET /tashift</tt> dump T_ambient shift" +
+              "<li> <tt>GET /param</tt> dump emissivity" +
               "</ul></body></html>");
   });
   web->begin();
