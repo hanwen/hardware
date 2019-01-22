@@ -37,8 +37,14 @@ std::unique_ptr<ESP8266WebServer> web;
 
 const char *apName = "IRCameraAP";
 const byte MLX90640_address = 0x33; // Default 7-bit unshifted address of the MLX90640
+struct {
+  float TA_SHIFT;
+  float emissivity;
+} params = {
+  8.0, // Default shift for MLX90640 in open air
+  0.95,
+};
 
-#define TA_SHIFT 8 // Default shift for MLX90640 in open air
 
 static float mlx90640To[768];
 paramsMLX90640 mlx90640;
@@ -101,11 +107,9 @@ void loop()
     }
     float vdd = MLX90640_GetVdd(mlx90640Frame, &mlx90640);
     float Ta = MLX90640_GetTa(mlx90640Frame, &mlx90640);
+    float tr = Ta - params.TA_SHIFT; // Reflected temperature based on the sensor ambient temperature
 
-    float tr = Ta - TA_SHIFT; // Reflected temperature based on the sensor ambient temperature
-    float emissivity = 0.95;
-
-    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, emissivity, tr, mlx90640To);
+    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, params.emissivity, tr, mlx90640To);
   }
   int readMillis = millis() - start;
   MLX90640_BadPixelsCorrection(mlx90640.outlierPixels, mlx90640To, mode, &mlx90640);
@@ -318,15 +322,39 @@ void handleTemp() {
   web->send(200, "application/json", out.c_str());
 }
 
+void handleEmissivity() {
+  if (web->method() == HTTP_GET) {
+    web->send(200, "text/plain",
+              String(params.emissivity, 4));
+  } else {
+    web->send(404, "text/plain", "not found");
+  }
+}
+
+void handleTaShift() {
+  if (web->method() == HTTP_GET) {
+    web->send(200, "text/plain",
+              String(params.TA_SHIFT, 2));
+  } else {
+    web->send(404, "text/plain", "not found");
+  }
+}
+
 void setupWebserver() {
   web.reset(new ESP8266WebServer(80));
   // TODO - allow to set emissivity
   // TODO - allow to skip processing and dump raw sensor data?
   // TODO - dump MLX parameters?
   web->on("/temp", handleTemp);
+  web->on("/emissivity", handleEmissivity);
+  web->on("/tashift", handleTaShift);
   web->on("/", []() {
-    web->send(200, "text/plain",
-              "<html><body><p>endpoint: <tt>GET /temp</tt> dump latest reading</body></html>");
+    web->send(200, "text/html",
+              String("<html><body><p>endpoint:<ul>") +  
+              "<li> <tt>GET /temp</tt> dump latest reading" +
+              "<li> <tt>GET /emisssivity</tt> dump emissivity" +
+              "<li> <tt>GET /tashift</tt> dump T_ambient shift" +
+              "</ul></body></html>");
   });
   web->begin();
 }
