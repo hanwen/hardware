@@ -48,17 +48,39 @@ struct Params {
   float TA_SHIFT;
   float emissivity;
 
+  // Refresh rate. This seems to be the rate for reading a
+  // page. Reading all pixels goes half as fast
+  float frequency;
+
+  Params() {
+    TA_SHIFT = 8.0; // Default shift for MLX90640 in open air
+    emissivity = 0.95;
+    frequency = 4.0;
+  }
+  
   boolean valid() {
     return (TA_SHIFT > -100 && TA_SHIFT < 100 &&
-            emissivity > 0.0 && emissivity < 1.0);
+            emissivity > 0.0 && emissivity < 1.0 &&
+            frequency >= 0.5 && frequency <= 64
+            );
+  }
+
+  void send() {
+    if (frequency < 1) {
+      MLX90640_SetRefreshRate(MLX90640_address, 0x00);
+    }
+
+    int f = 1;
+    byte shift = 0;
+    while ((1 << shift) < frequency) {
+      shift++;
+    }
+
+    MLX90640_SetRefreshRate(MLX90640_address, shift + 1);
   }
 };
 
-Params params = {
-  8.0, // Default shift for MLX90640 in open air
-  0.95,
-};
-
+Params params;
 
 static float mlx90640To[768];
 paramsMLX90640 mlx90640;
@@ -91,8 +113,8 @@ void setup()
   if (status != 0)
     Serial.println("Parameter extraction failed");
 
-  MLX90640_SetRefreshRate(MLX90640_address, 0x03);
-
+  params.send();
+  
   // Once EEPROM has been read at 400kHz we can increase to 1MHz
   Wire.setClock(1000000);
 
@@ -356,11 +378,13 @@ void handleParam() {
     p = &newParams.emissivity;
   } else if (name == "tashift") {
     p = &newParams.TA_SHIFT;
+  } else if (name == "frequency") {
+    p = &newParams.frequency;
   }
 
   if (NULL == p) {
     web->send(400, "text/plain", "unknown 'n' parameter  '" + name + "'.\n"
-              + "Supported: emissivity, tashift");
+              + "Supported: emissivity, frequency, tashift");
     return;
   }
     
@@ -369,7 +393,7 @@ void handleParam() {
               String(*p, 4));
   } else if (web->method() == HTTP_POST) {
     if (val.length() == 0 || !isdigit(val[0])) {
-      web->send(400, "text/plain", "value must start with digit: '" + val + "'");
+      web->send(400, "text/plain", "value 'v' must start with digit: '" + val + "'");
       return;
     }
     
@@ -380,6 +404,7 @@ void handleParam() {
     }
 
     params = newParams;
+    params.send();
     web->send(200, "text/plain",
               String(*p, 4));
   } else {
@@ -390,7 +415,6 @@ void handleParam() {
 void setupWebserver() {
   web.reset(new ESP8266WebServer(80));
   // TODO - allow to skip processing and dump raw sensor data?
-  // TODO - dump MLX parameters?
   web->on("/temp", handleTemp);
   web->on("/param", handleParam);
   web->on("/", []() {
