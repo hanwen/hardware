@@ -105,15 +105,20 @@ void loop()
       Serial.print("GetFrame Error: ");
       Serial.println(status);
     }
+    yield();
+    
     float vdd = MLX90640_GetVdd(mlx90640Frame, &mlx90640);
     float Ta = MLX90640_GetTa(mlx90640Frame, &mlx90640);
     float tr = Ta - params.TA_SHIFT; // Reflected temperature based on the sensor ambient temperature
 
+    yield();
     MLX90640_CalculateTo(mlx90640Frame, &mlx90640, params.emissivity, tr, mlx90640To);
+    yield();
   }
   int readMillis = millis() - start;
   MLX90640_BadPixelsCorrection(mlx90640.outlierPixels, mlx90640To, mode, &mlx90640);
   MLX90640_BadPixelsCorrection(mlx90640.brokenPixels, mlx90640To, mode, &mlx90640);
+  yield();
 
   if (button == 0 && lastButton == 1) {
     configWifi();
